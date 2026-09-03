@@ -56,6 +56,39 @@ failure mode this package is for.
 `informative_missingness` is Bonferroni-corrected across the columns it tests, so a
 wide table does not manufacture a finding.
 
+## What it looks like
+
+`examples/a_wrong_number.py` builds a customer table with five ordinary bugs in
+it, none of which any schema test can see. Run it and the first thing printed is
+the reassuring part: no nulls, correct dtypes, plausible ranges. Everything
+passes. That is the moment the number gets shipped.
+
+Then:
+
+```
+CRITICAL clock_in_disguise [churn_risk]
+    every value falls inside the Unix epoch range for seconds.
+CRITICAL informative_missingness [support_note]
+    whether this is missing predicts 'churned'.
+    evidence: churned|missing=0.000  churned|present=1.000  z=-65.6
+CRITICAL duplicate_rows
+    300 of 4,300 rows (7.0%) are exact duplicates.
+CRITICAL parse_carnage [signup_date]
+    holds 2 different date formats in one column.
+WARNING  placeholders [credit_limit]
+    12.1% of values are exactly -999, a conventional 'no data' marker.
+```
+
+What each one costs:
+
+- The "highest-risk customers, call these first" list is the five most recent
+  signups. The risk score was never computed.
+- Drop the rows with a missing support note -- a standard cleaning step -- and
+  the churn rate goes from 50% to 100%.
+- The reporting job ran twice on Tuesday, so every total is 7% too high.
+- Average credit limit was reported as 4,275. Every real limit is 5,000.
+- Half the signup dates would silently become missing.
+
 ## A real example
 
 Four US grid operators publish their interconnection queues. Merged into one frame
