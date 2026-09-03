@@ -85,7 +85,7 @@ def clock_in_disguise(df: pd.DataFrame, **_) -> Iterator[Finding]:
         for unit, (a, b) in (("seconds", EPOCH_S), ("milliseconds", EPOCH_MS)):
             if a <= lo and hi <= b:
                 yield Finding(
-                    "clock_in_disguise", CRITICAL if named else WARNING, str(col),
+                    "clock_in_disguise/epoch", CRITICAL if named else WARNING, str(col),
                     f"every value falls inside the Unix epoch range for {unit}. "
                     "This column is a timestamp wearing a number's name.",
                     "Convert it to a datetime and find whatever was supposed to "
@@ -103,7 +103,7 @@ def clock_in_disguise(df: pd.DataFrame, **_) -> Iterator[Finding]:
             rho = _spearman(df[col], df[dcol].astype("int64", errors="ignore"))
             if not np.isnan(rho) and abs(rho) > 0.95:
                 yield Finding(
-                    "clock_in_disguise", CRITICAL if named else WARNING, str(col),
+                    "clock_in_disguise/tracks_date", CRITICAL if named else WARNING, str(col),
                     f"moves almost perfectly with '{dcol}' (rank correlation "
                     f"{rho:+.3f}). Sorting by it sorts by time.",
                     "Check whether the value was ever computed, or whether a "
@@ -117,7 +117,7 @@ def clock_in_disguise(df: pd.DataFrame, **_) -> Iterator[Finding]:
                                 pd.Series(np.arange(len(s)), dtype=float))
             if not np.isnan(rho_idx) and abs(rho_idx) > 0.99:
                 yield Finding(
-                    "clock_in_disguise", WARNING, str(col),
+                    "clock_in_disguise/row_order", WARNING, str(col),
                     f"is monotone in row order (rank correlation {rho_idx:+.3f}). "
                     "It may be an index, an insertion order, or a counter.",
                     "Confirm the value is computed from the data and not from "
@@ -140,7 +140,7 @@ def degenerate(df: pd.DataFrame, **_) -> Iterator[Finding]:
         s = df[col].dropna()
         if s.empty:
             yield Finding(
-                "degenerate", CRITICAL, str(col),
+                "degenerate/all_null", CRITICAL, str(col),
                 "is entirely null. Nothing downstream can be using this, or "
                 "something downstream is using nulls.",
                 "Find the write that was supposed to fill it. A field renamed "
@@ -153,7 +153,7 @@ def degenerate(df: pd.DataFrame, **_) -> Iterator[Finding]:
         named = bool(MEANINGFUL.search(str(col)))
         if nun == 1:
             yield Finding(
-                "degenerate", CRITICAL if named else WARNING, str(col),
+                "degenerate/constant", CRITICAL if named else WARNING, str(col),
                 f"has exactly one distinct value ({s.iloc[0]!r}) across "
                 f"{len(s):,} rows.",
                 "A constant cannot rank, threshold or discriminate. Check the "
@@ -165,7 +165,7 @@ def degenerate(df: pd.DataFrame, **_) -> Iterator[Finding]:
         top_share = s.value_counts(normalize=True).iloc[0]
         if top_share > 0.99 and len(s) >= 50:
             yield Finding(
-                "degenerate", WARNING, str(col),
+                "degenerate/near_constant", WARNING, str(col),
                 f"is {top_share:.1%} a single value "
                 f"({s.value_counts().index[0]!r}).",
                 "Near-constant columns usually mean a default is being written "
@@ -189,7 +189,7 @@ def degenerate(df: pd.DataFrame, **_) -> Iterator[Finding]:
             bounded = float(s.min()) >= -1.5 and float(s.max()) <= 1.5
             if bounded and spread / scale < 1e-4:
                 yield Finding(
-                    "degenerate", CRITICAL, str(col),
+                    "degenerate/no_spread", CRITICAL, str(col),
                     f"varies by {spread:.3g} across {len(s):,} rows, on values "
                     f"around {float(s.mean()):.6g}. It is numerically constant.",
                     "A similarity or score that cannot separate anything is not "
@@ -239,7 +239,7 @@ def parse_carnage(df: pd.DataFrame, **_) -> Iterator[Finding]:
                 sample = present[datey][present[datey].map(_shape) == shp].iloc[0]
                 ex[sample] = f"{real[shp]:.0%}"
             yield Finding(
-                "parse_carnage", CRITICAL, str(col),
+                "parse_carnage/mixed_formats", CRITICAL, str(col),
                 f"holds {len(real)} different date formats in one column. "
                 "Parsed together, one format wins and the rest become NaT -- "
                 "which is indistinguishable from data that was simply absent.",
@@ -258,7 +258,7 @@ def parse_carnage(df: pd.DataFrame, **_) -> Iterator[Finding]:
         total = int(datey.sum())
         if total and kept / total < 0.98:
             yield Finding(
-                "parse_carnage", CRITICAL, str(col),
+                "parse_carnage/unparsed", CRITICAL, str(col),
                 f"looks like dates but only {kept:,} of {total:,} values parse "
                 f"({kept / total:.1%}).",
                 "Find out what the unparsed values actually are before dropping "
@@ -309,7 +309,7 @@ def informative_missingness(df: pd.DataFrame, target: str | None = None,
         z = (pa - pb) / se
         if abs(z) > z_crit:
             yield Finding(
-                "informative_missingness", CRITICAL, str(col),
+                "informative_missingness/predicts_target", CRITICAL, str(col),
                 f"whether this is missing predicts '{target}'. Rows where it is "
                 f"missing average {pa:.3f}; rows where it is present average "
                 f"{pb:.3f}.",
@@ -367,7 +367,7 @@ def vocabulary_collisions(df: pd.DataFrame, max_categories: int = 200,
         if collisions:
             shown = list(collisions.values())[:5]
             yield Finding(
-                "vocabulary_collisions", WARNING, str(col),
+                "vocabulary_collisions/punctuation", WARNING, str(col),
                 f"{len(collisions)} label(s) differ only by case, spacing or "
                 f"punctuation: {shown}",
                 "Normalise before grouping, or every rate you compute by this "
@@ -394,7 +394,7 @@ def vocabulary_collisions(df: pd.DataFrame, max_categories: int = 200,
         if abbrev:
             shown = list(abbrev.values())[:5]
             yield Finding(
-                "vocabulary_collisions", WARNING, str(col),
+                "vocabulary_collisions/abbreviation", WARNING, str(col),
                 f"{len(abbrev)} group(s) look like abbreviations of each other: "
                 f"{shown}",
                 "Check whether these are the same category written two ways "
@@ -420,7 +420,7 @@ def placeholders(df: pd.DataFrame, **_) -> Iterator[Finding]:
             if hits.any() and hits.mean() > 0.01:
                 top = low[hits].value_counts().head(3).to_dict()
                 yield Finding(
-                    "placeholders", WARNING, str(col),
+                    "placeholders/text", WARNING, str(col),
                     f"{hits.mean():.1%} of values are placeholder text.",
                     "These are not categories. Decide whether they are missing "
                     "data before they end up as a level in a model.",
@@ -431,7 +431,7 @@ def placeholders(df: pd.DataFrame, **_) -> Iterator[Finding]:
                 share = float((s == sentinel).mean())
                 if share > 0.01:
                     yield Finding(
-                        "placeholders", CRITICAL if named else WARNING, str(col),
+                        "placeholders/sentinel_number", CRITICAL if named else WARNING, str(col),
                         f"{share:.1%} of values are exactly {sentinel}, a "
                         "conventional 'no data' marker.",
                         "Convert to null. Averaged or ranked as a number, this "
@@ -444,7 +444,7 @@ def placeholders(df: pd.DataFrame, **_) -> Iterator[Finding]:
             hits = iso.isin(PLACEHOLDER_DATES)
             if hits.any() and hits.mean() > 0.005:
                 yield Finding(
-                    "placeholders", WARNING, str(col),
+                    "placeholders/sentinel_date", WARNING, str(col),
                     f"{hits.mean():.1%} of dates sit on an epoch or sentinel "
                     f"value ({sorted(set(iso[hits]))[:3]}).",
                     "A zero timestamp is missing data that sorts as very old.",
@@ -468,7 +468,7 @@ def duplicate_rows(df: pd.DataFrame, key: Iterable[str] | None = None,
     dup = int(df.duplicated().sum())
     if dup:
         yield Finding(
-            "duplicate_rows", CRITICAL if dup / n > 0.01 else WARNING, None,
+            "duplicate_rows/exact", CRITICAL if dup / n > 0.01 else WARNING, None,
             f"{dup:,} of {n:,} rows ({dup / n:.1%}) are exact duplicates.",
             "Deduplicate before aggregating. Repeated ingestion of one period "
             "shows up downstream as a real-looking jump in volume.",
@@ -480,7 +480,7 @@ def duplicate_rows(df: pd.DataFrame, key: Iterable[str] | None = None,
         missing = [c for c in key if c not in df.columns]
         if missing:
             yield Finding(
-                "duplicate_rows", CRITICAL, None,
+                "duplicate_rows/key_missing", CRITICAL, None,
                 f"declared key column(s) not present: {missing}",
                 "A key that does not exist silently becomes no key at all.",
                 {"missing": missing},
@@ -492,7 +492,7 @@ def duplicate_rows(df: pd.DataFrame, key: Iterable[str] | None = None,
                       .groupby(cols, dropna=False).size().sort_values(ascending=False)
                       .head(3).to_dict())
                 yield Finding(
-                    "duplicate_rows", CRITICAL, ", ".join(cols),
+                    "duplicate_rows/key_not_unique", CRITICAL, ", ".join(cols),
                     f"declared key is not unique: {d:,} duplicate row(s) across "
                     f"{cols}.",
                     "Widen the key until it is unique, and report the rows that "

@@ -114,6 +114,59 @@ have silently corrupted every change record built on that key.
 Finding them by hand took hours. `pipelie` finds them in under a second, and it
 found two more date columns with the same defect that had not been checked at all.
 
+## Adopting it on a table that already has problems
+
+Every table has problems. A checker that fails your build on day one over
+things that predate it gets deleted, so there are two ways to say "not this
+one".
+
+**Accept today's findings as debt.** Run once:
+
+```bash
+pipelie data.csv --key id --accept
+```
+
+That writes `pipelie-baseline.json`. From then on:
+
+```bash
+pipelie data.csv --key id --baseline
+```
+
+reports only what is **new**. Old problems stay suppressed, tomorrow's bug
+still fails the build. Delete a line from the baseline file to start failing on
+it again.
+
+**Or ignore a rule permanently**, when you have decided it is not a problem
+here:
+
+```bash
+pipelie data.csv --ignore 'duplicate_rows/*' --ignore '*:legacy_id'
+```
+
+Patterns are globs over `code:column`, so `parse_carnage/*`, `*:Queue ID` and
+`duplicate_rows/key_not_unique:id` all work. The same arguments exist on
+`audit()`:
+
+```python
+pipelie.audit(df, key=["id"], ignore=["duplicate_rows/*"], baseline="pipelie-baseline.json")
+pipelie.accept(df, key=["id"])        # write the baseline from Python
+```
+
+Findings are identified by **rule code and column, never by counts** -- a
+column with 1,351 duplicates today and 1,352 tomorrow is the same finding, so a
+baseline does not fall apart the moment the data moves.
+
+## Machine-readable output
+
+```bash
+pipelie data.csv --json
+```
+
+Emits the full report -- rows, columns, checks run, and every finding with its
+`code`, `fingerprint`, `severity`, `message`, `fix` and `evidence`. Exit code is
+1 when anything critical survives suppression, 0 otherwise, so it drops into CI
+unchanged.
+
 ## Design
 
 **Silence is the default.** A checker that fires on clean data gets muted, and a

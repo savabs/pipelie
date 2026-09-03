@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pipelie"
-version = "0.1.0"
+version = "0.2.0"
 description = "Finds the bugs that leave your data pipeline reporting green while the numbers are wrong."
 readme = "README.md"
 requires-python = ">=3.10"

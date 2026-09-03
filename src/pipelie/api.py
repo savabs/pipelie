@@ -1,35 +1,49 @@
-"""The public surface: audit(), and a guard for use inside a pipeline."""
+"""The public surface: audit(), guard(), and baseline helpers."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
 
 from .checks import ALL_CHECKS
 from .finding import Report
+from .suppress import apply, read_baseline, write_baseline
 
 
 def audit(df: pd.DataFrame, target: str | None = None,
           key: Iterable[str] | None = None,
+          ignore: Iterable[str] | None = None,
+          baseline: str | Path | Iterable[str] | None = None,
           checks=ALL_CHECKS) -> Report:
     """Run every check against a table and return what it found.
 
     Arguments:
-        df:     the table, after whatever cleaning you already do.
-        target: the outcome column, if there is one. Unlocks the missingness
-                check -- the one that catches selection on the answer.
-        key:    columns you believe uniquely identify a row. Checked, not
-                trusted; this is how "Queue ID" turned out not to be a key in
-                three sources out of four.
+        df:       the table, after whatever cleaning you already do.
+        target:   the outcome column, if there is one. Unlocks the missingness
+                  check -- the one that catches selection on the answer.
+        key:      columns you believe uniquely identify a row. Checked, not
+                  trusted; this is how "Queue ID" turned out not to be a key in
+                  three sources out of four.
+        ignore:   glob patterns over "code:column" for rules you have decided
+                  are not problems here. See suppress.matches.
+        baseline: a path to a baseline file, or fingerprints directly. Findings
+                  already accepted there are suppressed, so only new ones fail.
 
     Nothing here mutates the frame.
     """
-    findings, ran = [], []
+    found, ran = [], []
     for check in checks:
         ran.append(check.__name__)
-        findings.extend(check(df, target=target, key=key))
-    return Report(findings=findings, checks_run=ran,
-                  rows=len(df), columns=df.shape[1])
+        found.extend(check(df, target=target, key=key))
+
+    known = baseline
+    if isinstance(baseline, (str, Path)):
+        known = read_baseline(baseline)
+    kept, hidden = apply(found, ignore=ignore, baseline=known)
+
+    return Report(findings=kept, checks_run=ran, rows=len(df),
+                  columns=df.shape[1], suppressed=hidden)
 
 
 def guard(df: pd.DataFrame, **kw) -> pd.DataFrame:
@@ -42,3 +56,14 @@ def guard(df: pd.DataFrame, **kw) -> pd.DataFrame:
     """
     audit(df, **kw).raise_for_critical()
     return df
+
+
+def accept(df: pd.DataFrame, path: str | Path = "pipelie-baseline.json",
+           **kw) -> int:
+    """Freeze today's findings as accepted debt, and return how many.
+
+    Run once when adopting the tool on a table that already has problems. From
+    then on `audit(df, baseline=path)` reports only what is new.
+    """
+    kw.pop("baseline", None)
+    return write_baseline(path, audit(df, **kw).findings)
