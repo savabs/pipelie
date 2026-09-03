@@ -10,6 +10,7 @@ from .checks import ALL_CHECKS
 from .finding import Report
 from .profile import drift as _drift
 from .profile import load_profile, profile, save_profile
+from .stream import DEFAULT_CHUNK, DEFAULT_SAMPLE, exact_findings, scan
 from .suppress import apply, read_baseline, write_baseline
 
 
@@ -90,3 +91,48 @@ def snapshot(df: pd.DataFrame, path: str | Path = "pipelie-profile.json") -> dic
     prof = profile(df)
     save_profile(prof, path)
     return prof
+
+
+def audit_file(path: str | Path, target: str | None = None,
+               key: Iterable[str] | None = None,
+               ignore: Iterable[str] | None = None,
+               baseline: str | Path | Iterable[str] | None = None,
+               profile_path: str | Path | dict | None = None,
+               chunksize: int = DEFAULT_CHUNK,
+               sample: int = DEFAULT_SAMPLE,
+               exact_duplicates: bool = True) -> Report:
+    """Audit a file too large to hold in memory.
+
+    Streams it once. Row counts and duplicates are computed over every row --
+    duplicates cannot be sampled, because two copies of a row will almost never
+    both be drawn. Everything else runs on a uniform reservoir sample, which is
+    ample for the proportions those checks test.
+
+    Below `sample` rows this is exactly `audit()` on the whole file, and says so
+    by leaving `sampled_rows` at zero.
+    """
+    df, exact = scan(path, key=key, chunksize=chunksize, sample=sample,
+                     exact_duplicates=exact_duplicates)
+
+    # duplicate_rows is computed exactly below; running it on the sample too
+    # would report a smaller count for the same defect.
+    checks = [c for c in ALL_CHECKS if c.__name__ != "duplicate_rows"]
+    found, ran = [], []
+    for check in checks:
+        ran.append(check.__name__)
+        found.extend(check(df, target=target, key=None))
+    ran.append("duplicate_rows")
+    found.extend(exact_findings(exact, key))
+
+    if profile_path is not None:
+        ran.append("drift")
+        found.extend(_drift(df, profile_path))
+
+    known = baseline
+    if isinstance(baseline, (str, Path)):
+        known = read_baseline(baseline)
+    kept, hidden = apply(found, ignore=ignore, baseline=known)
+
+    return Report(findings=kept, checks_run=ran, rows=exact["rows"],
+                  columns=len(exact["columns"]), suppressed=hidden,
+                  sampled_rows=exact["sample_rows"] if exact["sampled"] else 0)

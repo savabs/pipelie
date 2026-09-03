@@ -114,6 +114,43 @@ have silently corrupted every change record built on that key.
 Finding them by hand took hours. `pipelie` finds them in under a second, and it
 found two more date columns with the same defect that had not been checked at all.
 
+## Files bigger than memory
+
+```bash
+pipelie huge.csv --key id          # streams; no flag needed
+```
+
+```python
+pipelie.audit_file("huge.csv", key=["id"])
+```
+
+12 million rows, a 352MB CSV: **4 seconds, 449MB peak.** Memory is bounded by
+the sample, not the file.
+
+The split matters and the report states it:
+
+> `streamed: duplicates and row counts exact over all 12,000,000 rows;`
+> `every other check on a uniform sample of 200,000`
+
+**Proportions are sampled.** Null rates, category shares, date-format shares. A
+200,000-row sample pins a 10% rate to within about a tenth of a percentage
+point, and no threshold here is remotely that tight.
+
+**Counting is not.** Duplicates cannot be sampled: draw 200,000 rows from 50
+million and two copies of the same row will almost never both appear. A sampled
+duplicate check would report "clean" on a table that is half duplicates -- the
+exact reporting-green-while-wrong failure this package exists to stop. So every
+row is hashed and duplicates are counted over all of them.
+
+That is the only part costing memory per row: 8 bytes, or 16 with a key. 100
+million rows is about 1.6GB. Pass `--no-exact-duplicates` to trade those two
+checks for constant memory.
+
+The sample is a proper reservoir, not the first N rows -- otherwise every share
+would describe the head of the file rather than the file. Below the sample size
+nothing is sampled at all, and `audit_file` returns exactly what `audit` does on
+the same data. There is a test asserting that.
+
 ## Catching a table that CHANGED
 
 The checks above ask whether a table is wrong on its own terms. A running

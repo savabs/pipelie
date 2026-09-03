@@ -73,6 +73,9 @@ class Report:
     rows: int = 0
     columns: int = 0
     suppressed: int = 0
+    # Set when the table was streamed and checks ran on a uniform sample.
+    # Counting checks stay exact; see stream.py for which and why.
+    sampled_rows: int = 0
 
     def __post_init__(self) -> None:
         self.findings.sort(key=lambda f: (_ORDER.get(f.severity, 9), f.code, f.column or ""))
@@ -99,11 +102,16 @@ class Report:
     def to_dict(self) -> dict[str, Any]:
         return {"rows": self.rows, "columns": self.columns,
                 "checks_run": self.checks_run, "suppressed": self.suppressed,
-                "ok": self.ok, "findings": [f.to_dict() for f in self.findings]}
+                "sampled_rows": self.sampled_rows, "ok": self.ok,
+                "findings": [f.to_dict() for f in self.findings]}
 
     def __str__(self) -> str:
         head = (f"pipelie: {self.rows:,} rows x {self.columns} columns, "
                 f"{len(self.checks_run)} checks")
+        if self.sampled_rows:
+            head += (f"\n  streamed: duplicates and row counts exact over all "
+                     f"{self.rows:,} rows; every other check on a uniform "
+                     f"sample of {self.sampled_rows:,}")
         if self.suppressed:
             head += f", {self.suppressed} suppressed"
         if not self.findings:

@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from .api import audit, snapshot
+from .api import audit_file, snapshot
+from .stream import DEFAULT_CHUNK, DEFAULT_SAMPLE
 from .suppress import write_baseline
 
 BASELINE = "pipelie-baseline.json"
@@ -49,6 +50,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--snapshot", nargs="?", const=PROFILE, metavar="FILE",
                     help="record what this table looks like now, for later "
                          "comparison, and exit 0")
+    ap.add_argument("--sample", type=int, default=DEFAULT_SAMPLE, metavar="N",
+                    help=f"rows to sample for the distribution checks when the "
+                         f"file is larger (default {DEFAULT_SAMPLE:,}). Row "
+                         f"counts and duplicates stay exact regardless.")
+    ap.add_argument("--chunksize", type=int, default=DEFAULT_CHUNK, metavar="N",
+                    help=f"rows read at a time (default {DEFAULT_CHUNK:,})")
+    ap.add_argument("--no-exact-duplicates", action="store_true",
+                    help="skip duplicate detection, which is the only part "
+                         "that costs memory per row (8 bytes)")
     ap.add_argument("--json", action="store_true", help="emit JSON instead of text")
     ap.add_argument("--strict", action="store_true",
                     help="exit 1 on any finding, not just critical ones")
@@ -58,8 +68,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no such file: {a.path}", file=sys.stderr)
         return 2
 
-    df = _load(a.path)
     key = [c.strip() for c in a.key.split(",")] if a.key else None
+
+    if a.snapshot or a.accept:
+        df = _load(a.path)
 
     if a.snapshot:
         prof = snapshot(df, a.snapshot)
@@ -69,14 +81,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if a.accept:
-        fs = audit(df, target=a.target, key=key).findings
+        fs = audit_file(a.path, target=a.target, key=key).findings
         n = write_baseline(a.accept, fs)
         print(f"accepted {n} finding(s) as baseline -> {a.accept}")
         print("future runs with --baseline will report only what is new.")
         return 0
 
-    report = audit(df, target=a.target, key=key, ignore=a.ignore,
-                   baseline=a.baseline, profile_path=a.profile)
+    report = audit_file(a.path, target=a.target, key=key, ignore=a.ignore,
+                        baseline=a.baseline, profile_path=a.profile,
+                        chunksize=a.chunksize, sample=a.sample,
+                        exact_duplicates=not a.no_exact_duplicates)
 
     if a.json:
         print(json.dumps(report.to_dict(), indent=2, default=str))
