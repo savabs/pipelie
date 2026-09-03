@@ -8,6 +8,8 @@ import pandas as pd
 
 from .checks import ALL_CHECKS
 from .finding import Report
+from .profile import drift as _drift
+from .profile import load_profile, profile, save_profile
 from .suppress import apply, read_baseline, write_baseline
 
 
@@ -15,6 +17,7 @@ def audit(df: pd.DataFrame, target: str | None = None,
           key: Iterable[str] | None = None,
           ignore: Iterable[str] | None = None,
           baseline: str | Path | Iterable[str] | None = None,
+          profile_path: str | Path | dict | None = None,
           checks=ALL_CHECKS) -> Report:
     """Run every check against a table and return what it found.
 
@@ -29,6 +32,10 @@ def audit(df: pd.DataFrame, target: str | None = None,
                   are not problems here. See suppress.matches.
         baseline: a path to a baseline file, or fingerprints directly. Findings
                   already accepted there are suppressed, so only new ones fail.
+        profile_path: a profile written from an earlier version of this table.
+                  Adds drift findings -- a column that vanished, a dtype that
+                  flipped, a field that stopped being populated, a unit that
+                  changed. This is the question a running pipeline actually has.
 
     Nothing here mutates the frame.
     """
@@ -36,6 +43,10 @@ def audit(df: pd.DataFrame, target: str | None = None,
     for check in checks:
         ran.append(check.__name__)
         found.extend(check(df, target=target, key=key))
+
+    if profile_path is not None:
+        ran.append("drift")
+        found.extend(_drift(df, profile_path))
 
     known = baseline
     if isinstance(baseline, (str, Path)):
@@ -67,3 +78,15 @@ def accept(df: pd.DataFrame, path: str | Path = "pipelie-baseline.json",
     """
     kw.pop("baseline", None)
     return write_baseline(path, audit(df, **kw).findings)
+
+
+def snapshot(df: pd.DataFrame, path: str | Path = "pipelie-profile.json") -> dict:
+    """Record what this table looks like now, for comparison later.
+
+    Stores a small JSON summary -- dtypes, null rates, quantiles, top category
+    shares -- and never the data itself. Pass the same path to
+    `audit(..., profile_path=path)` on a later run to be told what changed.
+    """
+    prof = profile(df)
+    save_profile(prof, path)
+    return prof

@@ -114,6 +114,67 @@ have silently corrupted every change record built on that key.
 Finding them by hand took hours. `pipelie` finds them in under a second, and it
 found two more date columns with the same defect that had not been checked at all.
 
+## Catching a table that CHANGED
+
+The checks above ask whether a table is wrong on its own terms. A running
+pipeline has a different question: **is this table different from the one my
+code was written against?**
+
+That is where most production breakage actually lives. Nobody ships against a
+broken table -- they ship against a working one, and then something upstream
+moves. A field stops being populated. An integer column arrives as text because
+one row had a comma in it. Somebody switches megawatts to kilowatts. A category
+every downstream branch expects disappears. All of it keeps the schema valid and
+the row count healthy.
+
+Record what the table looks like today:
+
+```bash
+pipelie data.csv --snapshot          # writes pipelie-profile.json
+```
+
+Then on any later run:
+
+```bash
+pipelie data.csv --profile           # what changed?
+```
+
+```
+CRITICAL drift/column_missing [region]
+    column was in the profile and is not in this table.
+CRITICAL drift/scale_shift [capacity_mw]
+    typical value moved from 52.8 to 5.28e+04, a factor of 1,000.
+    fix: A jump this size is a unit change -- megawatts to kilowatts, dollars
+         to cents -- far more often than it is real movement.
+```
+
+| it catches | severity |
+|---|---|
+| a column vanished or was renamed | critical |
+| a dtype flipped (numbers arriving as text) | critical |
+| a field stopped being populated | critical / warning |
+| a unit changed | critical |
+| a column stopped varying | critical |
+| the row count doubled or halved | warning |
+| category values appeared or disappeared | warning |
+| the distribution moved by more than a standard deviation | warning |
+
+From Python:
+
+```python
+pipelie.snapshot(df, "profile.json")             # once
+pipelie.audit(df, profile_path="profile.json")   # later
+```
+
+The profile is a small JSON summary -- dtypes, null rates, quantiles, the top
+category shares -- and never the data itself. It stays a few kilobytes whether
+the table has a thousand rows or a billion.
+
+**It is tuned to stay quiet.** Fifty independent resamples of the same process
+produce zero findings, and that is a test in the suite rather than a claim.
+Structural changes are critical because they break code; distributional moves
+are warnings, because usually they are the business rather than a bug.
+
 ## Adopting it on a table that already has problems
 
 Every table has problems. A checker that fails your build on day one over

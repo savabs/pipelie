@@ -8,10 +8,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from .api import audit
+from .api import audit, snapshot
 from .suppress import write_baseline
 
 BASELINE = "pipelie-baseline.json"
+PROFILE = "pipelie-profile.json"
 
 
 def _load(path: Path) -> pd.DataFrame:
@@ -29,7 +30,9 @@ def main(argv: list[str] | None = None) -> int:
         description="Find the bugs that leave a pipeline reporting green.",
         epilog="Adopting on a table that already has problems: run once with "
                "--accept to record today's findings as debt, then use "
-               "--baseline so only new problems fail the build.")
+               "--baseline so only new problems fail the build. To catch a "
+               "table CHANGING rather than being wrong, --snapshot it once and "
+               "pass --profile on later runs.")
     ap.add_argument("path", type=Path, help="CSV, Parquet or JSON file")
     ap.add_argument("--target", help="outcome column; unlocks the missingness check")
     ap.add_argument("--key", help="comma-separated columns you believe are unique")
@@ -40,6 +43,12 @@ def main(argv: list[str] | None = None) -> int:
                     help=f"suppress findings recorded in FILE (default {BASELINE})")
     ap.add_argument("--accept", nargs="?", const=BASELINE, metavar="FILE",
                     help="write today's findings to FILE as accepted debt and exit 0")
+    ap.add_argument("--profile", nargs="?", const=PROFILE, metavar="FILE",
+                    help=f"compare against a profile written earlier and report "
+                         f"what changed (default {PROFILE})")
+    ap.add_argument("--snapshot", nargs="?", const=PROFILE, metavar="FILE",
+                    help="record what this table looks like now, for later "
+                         "comparison, and exit 0")
     ap.add_argument("--json", action="store_true", help="emit JSON instead of text")
     ap.add_argument("--strict", action="store_true",
                     help="exit 1 on any finding, not just critical ones")
@@ -52,6 +61,13 @@ def main(argv: list[str] | None = None) -> int:
     df = _load(a.path)
     key = [c.strip() for c in a.key.split(",")] if a.key else None
 
+    if a.snapshot:
+        prof = snapshot(df, a.snapshot)
+        print(f"profiled {prof['rows']:,} rows x {len(prof['columns'])} columns "
+              f"-> {a.snapshot}")
+        print("run again later with --profile to be told what changed.")
+        return 0
+
     if a.accept:
         fs = audit(df, target=a.target, key=key).findings
         n = write_baseline(a.accept, fs)
@@ -59,8 +75,8 @@ def main(argv: list[str] | None = None) -> int:
         print("future runs with --baseline will report only what is new.")
         return 0
 
-    report = audit(df, target=a.target, key=key,
-                   ignore=a.ignore, baseline=a.baseline)
+    report = audit(df, target=a.target, key=key, ignore=a.ignore,
+                   baseline=a.baseline, profile_path=a.profile)
 
     if a.json:
         print(json.dumps(report.to_dict(), indent=2, default=str))
