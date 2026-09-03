@@ -174,7 +174,7 @@ def degenerate(df: pd.DataFrame, **_) -> Iterator[Finding]:
             )
             continue
 
-        if named and pd.api.types.is_numeric_dtype(s) and len(s) >= 20:
+        if pd.api.types.is_numeric_dtype(s) and len(s) >= 20:
             spread = float(s.max()) - float(s.min())
             scale = max(abs(float(s.mean())), 1e-12)
             # Restricted to columns living in a bounded range -- similarities,
@@ -182,6 +182,10 @@ def degenerate(df: pd.DataFrame, **_) -> Iterator[Finding]:
             # this small means the measure cannot separate anything. A column
             # with a large offset (a timestamp, a price) can have a tiny
             # relative spread and still be perfectly informative.
+            #
+            # Applied whatever the column is called. The original bug was in a
+            # column named "similarity", but the defect lives in the values,
+            # and a column called "sim" or "s2" is exactly as broken.
             bounded = float(s.min()) >= -1.5 and float(s.max()) <= 1.5
             if bounded and spread / scale < 1e-4:
                 yield Finding(

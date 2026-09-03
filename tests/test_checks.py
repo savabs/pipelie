@@ -72,6 +72,13 @@ def test_similarity_that_cannot_vary(clean):
     assert hit and hit[0].severity == pipelie.CRITICAL
 
 
+def test_degenerate_bounded_column_caught_whatever_it_is_called(clean):
+    """The defect is in the values. A column named "sim" is as broken as one
+    named "similarity", and naming must not be what saves it."""
+    df = clean.assign(sim=0.9998 + np.random.default_rng(0).normal(0, 1e-9, len(clean)))
+    assert [f for f in degenerate(df) if f.column == "sim"]
+
+
 def test_large_magnitude_column_is_not_called_constant(clean):
     """A price around 1e6 has a tiny relative spread and is perfectly fine."""
     assert not [f for f in degenerate(clean) if f.column == "price"]
